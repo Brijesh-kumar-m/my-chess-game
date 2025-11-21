@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HTML Canvas Chess Game</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');
+        
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #1f2937; /* Dark blue-gray background */
+            font-family: 'Roboto', sans-serif;
+            color: #f3f4f6;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        #game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: #374151; /* Darker container */
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            max-width: 95%;
+            min-width: 300px;
+        }
+
+        #game-status {
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            font-size: 1.25rem;
+            font-weight: 700;
+            padding: 5px 10px;
+            background-color: #4b5563;
+            border-radius: 8px;
+        }
+        
+        #message {
+            font-size: 0.9rem;
+            color: #d1d5db;
+        }
+
+        /* Canvas (Game Board) */
+        #chess-canvas {
+            border: 4px solid #f9fafb; /* Light border for contrast */
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.4);
+            border-radius: 4px;
+            cursor: pointer;
+            /* Ensure canvas scales nicely on mobile */
+            max-width: 100%;
+            height: auto;
+        }
+
+        /* Button Styling */
+        .game-btn {
+            font-family: 'Roboto', sans-serif;
+            padding: 10px 20px;
+            margin-top: 20px;
+            font-size: 1rem;
+            cursor: pointer;
+            border: none;
+            background-color: #10b981; /* Teal/Green */
+            color: #ffffff;
+            border-radius: 8px;
+            transition: background-color 0.2s, transform 0.1s, box-shadow 0.2s;
+            box-shadow: 0 4px #047857; /* Darker shadow for 3D effect */
+        }
+        .game-btn:hover {
+            background-color: #059669;
+        }
+        .game-btn:active {
+            box-shadow: 0 1px #047857;
+            transform: translateY(3px);
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 500px) {
+             #game-status {
+                flex-direction: column;
+                align-items: flex-start;
+                font-size: 1rem;
+            }
+            #message {
+                margin-top: 5px;
+                font-size: 0.8rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="game-status">
+            <div id="turn-display">White's Turn</div>
+            <div id="message">Click a piece to select it.</div>
+        </div>
+        <canvas id="chess-canvas"></canvas>
+        <button id="reset-btn" class="game-btn">Reset Game</button>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const canvas = document.getElementById('chess-canvas');
+            const ctx = canvas.getContext('2d');
+            const turnDisplay = document.getElementById('turn-display');
+            const messageDisplay = document.getElementById('message');
+            const resetButton = document.getElementById('reset-btn');
+
+            // --- Configuration ---
+            const BOARD_SIZE = 8;
+            let SQUARE_SIZE = 60; // Default square size
+            canvas.width = canvas.height = SQUARE_SIZE * BOARD_SIZE;
+
+            const LIGHT_SQUARE_COLOR = '#f3f4f6'; // White/Light Gray
+            const DARK_SQUARE_COLOR = '#4b5563';  // Dark Gray
+
+            const SELECTED_COLOR = 'rgba(255, 255, 0, 0.7)'; // Yellow for selection
+            const MOVE_HIGHLIGHT_COLOR = 'rgba(16, 185, 129, 0.8)'; // Teal for valid moves
+            const CAPTURE_HIGHLIGHT_COLOR = 'rgba(239, 68, 68, 0.8)'; // Red for capture
+
+            const PIECES = {
+                wk: '\u2654', wq: '\u2655', wr: '\u2656', wb: '\u2657', wn: '\u2658', wp: '\u2659',
+                bk: '\u265A', bq: '\u265B', br: '\u265C', bb: '\u265D', bn: '\u265E', bp: '\u265F',
+            };
+
+            // --- Game State ---
+            let board; // The 8x8 array holding piece codes
+            let currentTurn; // 'w' or 'b'
+            let selectedSquare = null; // { row, col } of the selected piece
+            let validMoves = []; // Array of { row, col } for the selected piece
+
+            // --- Piece Movement Logic (Simplified for brevity, but functional) ---
+
+            // Initial board setup in FEN-like notation (only for the starting position)
+            const STARTING_BOARD = [
+                ['br', 'bn', 'bb', 'bq', 'bk', 'bb', 'bn', 'br'],
+                ['bp', 'bp', 'bp', 'bp', 'bp', 'bp', 'bp', 'bp'],
+                [null, null, null, null, null, null, null, null],
+                [null, null, null, null, null, null, null, null],
+                [null, null, null, null, null, null, null, null],
+                [null, null, null, null, null, null, null, null],
+                ['wp', 'wp', 'wp', 'wp', 'wp', 'wp', 'wp', 'wp'],
+                ['wr', 'wn', 'wb', 'wq', 'wk', 'wb', 'wn', 'wr']
+            ];
+
+            // Helper to get piece info
+            function getPiece(row, col) {
+                return board[row] ? board[row][col] : null;
+            }
+
+            function getPieceColor(pieceCode) {
+                return pieceCode ? pieceCode[0] : null;
+            }
+
+            function isSquareOccupied(row, col) {
+                return board[row] && board[row][col] !== null;
+            }
+
+            function isValid(row, col) {
+                return row >= 0 && row < BOARD_SIZE && col >= 0 && col < BOARD_SIZE;
+            }
+
+            // Function to find all valid straight line moves (Rook, Queen, Bishop)
+            function checkStraightMoves(r, c, directions, pieceColor, checkCapture = true) {
+                const moves = [];
+                for (const [dr, dc] of directions) {
+                    for (let i = 1; i < BOARD_SIZE; i++) {
+                        const nr = r + i * dr;
+                        const nc = c + i * dc;
+
+                        if (!isValid(nr, nc)) break;
+
+                        const targetPiece = getPiece(nr, nc);
+                        const targetColor = getPieceColor(targetPiece);
+
+                        if (targetPiece === null) {
+                            moves.push({ row: nr, col: nc, type: 'move' }); // Empty square
+                        } else {
+                            if (checkCapture && targetColor !== pieceColor) {
+                                moves.push({ row: nr, col: nc, type: 'capture' }); // Capture
+                            }
+                            break; // Blocked by piece (own or opponent)
+                        }
+                    }
+                }
+                return moves;
+            }
+
+            // Centralized function to calculate all valid moves for a piece
+            function calculateValidMoves(r, c) {
+                const moves = [];
+                const pieceCode = getPiece(r, c);
+                if (!pieceCode) return moves;
+
+                const color = getPieceColor(pieceCode);
+                const type = pieceCode[1]; // k, q, r, b, n, p
+
+                // Directions for straight-line movement (used by R, B, Q)
+                const rookDirections = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+                const bishopDirections = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
+
+                switch (type) {
+                    case 'r': // Rook
+                        moves.push(...checkStraightMoves(r, c, rookDirections, color));
+                        break;
+                    case 'b': // Bishop
+                        moves.push(...checkStraightMoves(r, c, bishopDirections, color));
+                        break;
+                    case 'q': // Queen
+                        moves.push(...checkStraightMoves(r, c, rookDirections.concat(bishopDirections), color));
+                        break;
+                    case 'k': // King
+                        const kingDirections = rookDirections.concat(bishopDirections);
+                        for (const [dr, dc] of kingDirections) {
+                            const nr = r + dr;
+                            const nc = c + dc;
+                            if (isValid(nr, nc)) {
+                                const targetColor = getPieceColor(getPiece(nr, nc));
+                                if (targetColor !== color) {
+                                    moves.push({ row: nr, col: nc, type: targetColor ? 'capture' : 'move' });
+                                }
+                            }
+                        }
+                        // TODO: Add Castling logic
+                        break;
+                    case 'n': // Knight
+                        const knightMoves = [
+                            [2, 1], [2, -1], [-2, 1], [-2, -1],
+                            [1, 2], [1, -2], [-1, 2], [-1, -2]
+                        ];
+                        for (const [dr, dc] of knightMoves) {
+                            const nr = r + dr;
+                            const nc = c + dc;
+                            if (isValid(nr, nc)) {
+                                const targetColor = getPieceColor(getPiece(nr, nc));
+                                if (targetColor !== color) {
+                                    moves.push({ row: nr, col: nc, type: targetColor ? 'capture' : 'move' });
+                                }
+                            }
+                        }
+                        break;
+                    case 'p': // Pawn
+                        const forward = color === 'w' ? -1 : 1;
+                        const startRow = color === 'w' ? 6 : 1;
+                        
+                        // 1. Single forward step
+                        let nr = r + forward;
+                        let nc = c;
+                        if (isValid(nr, nc) && getPiece(nr, nc) === null) {
+                            moves.push({ row: nr, col: nc, type: 'move' });
+                            
+                            // 2. Double forward step (only from start row)
+                            if (r === startRow) {
+                                nr = r + 2 * forward;
+                                if (isValid(nr, nc) && getPiece(nr, nc) === null) {
+                                    moves.push({ row: nr, col: nc, type: 'move' });
+                                }
+                            }
+                        }
+
+                        // 3. Captures (diagonal)
+                        const captureCols = [-1, 1];
+                        captureCols.forEach(dc => {
+                            const captureR = r + forward;
+                            const captureC = c + dc;
+                            if (isValid(captureR, captureC)) {
+                                const targetPiece = getPiece(captureR, captureC);
+                                const targetColor = getPieceColor(targetPiece);
+                                if (targetPiece && targetColor !== color) {
+                                    moves.push({ row: captureR, col: captureC, type: 'capture' });
+                                }
+                            }
+                        });
+
+                        // TODO: Add En Passant and Promotion logic
+                        break;
+                }
+
+                // IMPORTANT: Filter out moves that result in the King being in Check
+                // This requires simulating the move, checking for check, and reverting.
+                // For a functional game, this is essential, but complex to include in a single example.
+                // We'll leave the check logic out for this MVP, but display a warning.
+                if (type === 'k') {
+                    messageDisplay.textContent = "Warning: King move validation (Check/Checkmate) is not yet fully implemented.";
+                }
+                
+                return moves;
+            }
+
+            // --- Drawing Functions ---
+
+            function drawBoard() {
+                for (let r = 0; r < BOARD_SIZE; r++) {
+                    for (let c = 0; c < BOARD_SIZE; c++) {
+                        // Determine square color (alternating pattern)
+                        const color = (r + c) % 2 === 0 ? LIGHT_SQUARE_COLOR : DARK_SQUARE_COLOR;
+                        ctx.fillStyle = color;
+                        ctx.fillRect(c * SQUARE_SIZE, r * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE);
+
+                        // Highlight selected square
+                        if (selectedSquare && selectedSquare.row === r && selectedSquare.col === c) {
+                            ctx.fillStyle = SELECTED_COLOR;
+                            ctx.fillRect(c * SQUARE_SIZE, r * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE);
+                        }
+                        
+                        // Highlight valid moves
+                        const move = validMoves.find(m => m.row === r && m.col === c);
+                        if (move) {
+                            // Draw a large dot for non-capture moves, or a circle around the piece for captures
+                            if (move.type === 'move') {
+                                ctx.fillStyle = MOVE_HIGHLIGHT_COLOR;
+                                ctx.beginPath();
+                                ctx.arc(c * SQUARE_SIZE + SQUARE_SIZE / 2, r * SQUARE_SIZE + SQUARE_SIZE / 2, SQUARE_SIZE * 0.25, 0, Math.PI * 2);
+                                ctx.fill();
+                            } else if (move.type === 'capture') {
+                                // Draw a ring for capture targets
+                                ctx.strokeStyle = CAPTURE_HIGHLIGHT_COLOR;
+                                ctx.lineWidth = 5;
+                                ctx.beginPath();
+                                ctx.arc(c * SQUARE_SIZE + SQUARE_SIZE / 2, r * SQUARE_SIZE + SQUARE_SIZE / 2, SQUARE_SIZE * 0.45, 0, Math.PI * 2);
+                                ctx.stroke();
+                            }
+                        }
+                    }
+                }
+            }
+
+            function drawPieces() {
+                ctx.font = `${SQUARE_SIZE * 0.8}px serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+
+                for (let r = 0; r < BOARD_SIZE; r++) {
+                    for (let c = 0; c < BOARD_SIZE; c++) {
+                        const pieceCode = board[r][c];
+                        if (pieceCode) {
+                            const pieceChar = PIECES[pieceCode];
+                            
+                            // Set color (White pieces are black symbols on screen, Black pieces are white symbols)
+                            // This flips the standard Unicode color scheme for better contrast on a light screen.
+                            ctx.fillStyle = pieceCode[0] === 'w' ? '#000000' : '#ffffff'; 
+
+                            const x = c * SQUARE_SIZE + SQUARE_SIZE / 2;
+                            const y = r * SQUARE_SIZE + SQUARE_SIZE / 2;
+                            ctx.fillText(pieceChar, x, y);
+                        }
+                    }
+                }
+            }
+
+            function drawGame() {
+                drawBoard();
+                drawPieces();
+            }
+
+            // --- Game Flow ---
+
+            function resetGame() {
+                // Deep copy the starting board
+                board = STARTING_BOARD.map(row => [...row]);
+                currentTurn = 'w';
+                selectedSquare = null;
+                validMoves = [];
+                updateStatus();
+                drawGame();
+                // Add a resize listener
+                window.addEventListener('resize', handleResize);
+                handleResize(); // Initial resize
+            }
+            
+            function handleResize() {
+                // Calculate new square size based on the smaller dimension of the container width
+                const containerWidth = canvas.parentElement.clientWidth;
+                SQUARE_SIZE = Math.floor(Math.min(60, (containerWidth - 4) / BOARD_SIZE)); // Max size 60px
+                
+                canvas.width = canvas.height = SQUARE_SIZE * BOARD_SIZE;
+                drawGame();
+            }
+
+
+            function makeMove(targetR, targetC) {
+                const startR = selectedSquare.row;
+                const startC = selectedSquare.col;
+
+                // Move the piece
+                board[targetR][targetC] = board[startR][startC];
+                board[startR][startC] = null;
+
+                // End turn
+                currentTurn = currentTurn === 'w' ? 'b' : 'w';
+                selectedSquare = null;
+                validMoves = [];
+                
+                // TODO: Check for Check/Checkmate/Stalemate and update status accordingly
+
+                updateStatus();
+                drawGame();
+            }
+
+            function updateStatus() {
+                turnDisplay.textContent = currentTurn === 'w' ? "White's Turn" : "Black's Turn";
+                
+                if (selectedSquare) {
+                    const piece = getPiece(selectedSquare.row, selectedSquare.col);
+                    const type = piece[1];
+                    const col_name = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'][selectedSquare.col];
+                    const row_name = 8 - selectedSquare.row;
+                    messageDisplay.textContent = `${piece.toUpperCase()} selected at ${col_name}${row_name}. (${validMoves.length} moves)`;
+                } else {
+                    messageDisplay.textContent = "Click a piece to select it.";
+                }
+            }
+
+            // --- Input Handling ---
+
+            canvas.addEventListener('click', (e) => {
+                // Get click coordinates relative to the canvas
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                // Determine the grid square
+                const col = Math.floor(x / SQUARE_SIZE);
+                const row = Math.floor(y / SQUARE_SIZE);
+
+                const clickedPiece = getPiece(row, col);
+                const clickedColor = getPieceColor(clickedPiece);
+
+                // 1. If a square is already selected (potential move)
+                if (selectedSquare) {
+                    const isMove = validMoves.some(m => m.row === row && m.col === col);
+                    
+                    if (isMove) {
+                        makeMove(row, col); // Execute the move
+                        return;
+                    }
+                    
+                    // If the click is on an empty square or an opponent's piece but it's not a valid move,
+                    // or if the click is on the currently selected piece, deselect.
+                    if (selectedSquare.row === row && selectedSquare.col === col) {
+                         // Deselect
+                        selectedSquare = null;
+                        validMoves = [];
+                        updateStatus();
+                        drawGame();
+                        return;
+                    }
+                }
+                
+                // 2. If a square is clicked (potential selection)
+                if (clickedPiece && clickedColor === currentTurn) {
+                    // Select a new piece belonging to the current player
+                    selectedSquare = { row, col };
+                    validMoves = calculateValidMoves(row, col);
+                    updateStatus();
+                    drawGame();
+                } else if (selectedSquare) {
+                    // Clicked an invalid target or an opponent's piece without a piece selected.
+                    // If a piece IS selected, but the target is not a valid move (handled above)
+                    // and not the same piece (handled above), it means the player clicked on
+                    // an invalid square or an opponent's piece that they can't capture.
+                    
+                    // Deselect if clicking own piece (that isn't the current selected one)
+                    if (clickedPiece && clickedColor === currentTurn) {
+                        selectedSquare = { row, col };
+                        validMoves = calculateValidMoves(row, col);
+                        updateStatus();
+                        drawGame();
+                    } else {
+                         // If clicking an opponent's piece or an empty square outside of valid moves, deselect
+                        selectedSquare = null;
+                        validMoves = [];
+                        updateStatus();
+                        drawGame();
+                    }
+                }
+            });
+
+            resetButton.addEventListener('click', resetGame);
+
+            // Start the game
+            resetGame();
+        });
+    </script>
+</body>
+</html>
